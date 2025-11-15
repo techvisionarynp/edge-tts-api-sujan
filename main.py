@@ -4,14 +4,11 @@ import edge_tts
 import asyncio
 from io import BytesIO
 import os
-
 app = FastAPI()
-
 def run_async(coro):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
-
 @app.get("/")
 async def root():
     return JSONResponse(
@@ -20,8 +17,7 @@ async def root():
             "developer": "Blind tech visionary"
         }
     )
-
-@app.get("/v1/convert")
+@app.get("/convert")
 async def convert(
     text: str = None,
     voice: str = "en-US-GuyNeural",
@@ -38,7 +34,6 @@ async def convert(
             },
             status_code=400
         )
-
     try:
         rate = rate if rate else "+0%"
         volume = volume if volume else "+0%"
@@ -47,12 +42,12 @@ async def convert(
         file_name = file_name if file_name and file_name.strip() else "generated_mp3.mp3"
         if not file_name.lower().endswith(".mp3"):
             file_name += ".mp3"
-
         communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
         audio_buffer = BytesIO()
-        await communicate.save(audio_buffer)
+        async for message in communicate:
+            if message["type"] == "audio":
+                audio_buffer.write(message["data"])
         audio_buffer.seek(0)
-
         return StreamingResponse(
             audio_buffer,
             media_type="audio/mpeg",
@@ -68,7 +63,6 @@ async def convert(
             },
             status_code=500
         )
-
 @app.get("/voices")
 async def list_voices():
     try:
