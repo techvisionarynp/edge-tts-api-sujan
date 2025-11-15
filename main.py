@@ -13,7 +13,7 @@ def run_async(coro):
 async def root():
     return JSONResponse(
         content={
-            "message": "API running... use /v1/convert.",
+            "message": "API running... use /convert.",
             "developer": "Blind tech visionary"
         }
     )
@@ -44,7 +44,7 @@ async def convert(
             file_name += ".mp3"
         communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
         audio_buffer = BytesIO()
-        async for message in communicate:
+        async for message in communicate.stream():
             if message["type"] == "audio":
                 audio_buffer.write(message["data"])
         audio_buffer.seek(0)
