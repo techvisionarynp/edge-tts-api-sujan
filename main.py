@@ -1,14 +1,25 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 import edge_tts
-import asyncio
 from io import BytesIO
 import os
+import tempfile
+
 app = FastAPI()
-def run_async(coro):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
+
+async def tts_to_bytes(text: str, voice: str, rate: str, volume: str, pitch: str) -> bytes:
+    communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
+        tmp_path = tmp_file.name
+    try:
+        await communicate.save(tmp_path)
+        with open(tmp_path, 'rb') as f:
+            audio_data = f.read()
+        return audio_data
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 @app.get("/")
 async def root():
     return JSONResponse(
@@ -17,6 +28,7 @@ async def root():
             "developer": "Blind tech visionary"
         }
     )
+
 @app.get("/convert")
 async def convert(
     text: str = None,
@@ -34,20 +46,20 @@ async def convert(
             },
             status_code=400
         )
+    
     try:
         rate = rate if rate else "+0%"
         volume = volume if volume else "+0%"
         pitch = pitch if pitch else "+0Hz"
         voice = voice if voice else "en-US-GuyNeural"
         file_name = file_name if file_name and file_name.strip() else "generated_mp3.mp3"
+        
         if not file_name.lower().endswith(".mp3"):
             file_name += ".mp3"
-        communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
-        audio_buffer = BytesIO()
-        async for message in communicate.stream():
-            if message["type"] == "audio":
-                audio_buffer.write(message["data"])
-        audio_buffer.seek(0)
+        
+        audio_data = await tts_to_bytes(text, voice, rate, volume, pitch)
+        audio_buffer = BytesIO(audio_data)
+        
         return StreamingResponse(
             audio_buffer,
             media_type="audio/mpeg",
@@ -63,6 +75,7 @@ async def convert(
             },
             status_code=500
         )
+
 @app.get("/voices")
 async def list_voices():
     try:
@@ -76,6 +89,7 @@ async def list_voices():
                 "Gender": v.get("Gender", "Unknown"),
                 "Locale": v.get("Locale", "N/A")
             })
+        
         return JSONResponse(
             content={
                 "status_code": 200,
