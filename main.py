@@ -3,22 +3,27 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import edge_tts
 from io import BytesIO
 import os
-import tempfile
 
 app = FastAPI()
 
 async def tts_to_bytes(text: str, voice: str, rate: str, volume: str, pitch: str) -> bytes:
     communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
-        tmp_path = tmp_file.name
+    
+    tmp_path = f"/tmp/tts_{os.getpid()}.mp3"
+    
     try:
         await communicate.save(tmp_path)
+        
         with open(tmp_path, 'rb') as f:
             audio_data = f.read()
+        
         return audio_data
     finally:
         if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
 
 @app.get("/")
 async def root():
@@ -58,13 +63,22 @@ async def convert(
             file_name += ".mp3"
         
         audio_data = await tts_to_bytes(text, voice, rate, volume, pitch)
-        audio_buffer = BytesIO(audio_data)
+        
+        if not audio_data or len(audio_data) == 0:
+            return JSONResponse(
+                content={
+                    "status_code": 500,
+                    "message": "No audio data generated"
+                },
+                status_code=500
+            )
         
         return StreamingResponse(
-            audio_buffer,
+            BytesIO(audio_data),
             media_type="audio/mpeg",
             headers={
-                "Content-Disposition": f"inline; filename={file_name}"
+                "Content-Disposition": f"inline; filename={file_name}",
+                "Content-Length": str(len(audio_data))
             }
         )
     except Exception as e:
