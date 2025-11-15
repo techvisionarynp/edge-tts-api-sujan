@@ -1,29 +1,9 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 import edge_tts
-from io import BytesIO
 import os
 
 app = FastAPI()
-
-async def tts_to_bytes(text: str, voice: str, rate: str, volume: str, pitch: str) -> bytes:
-    communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
-    
-    tmp_path = f"/tmp/tts_{os.getpid()}.mp3"
-    
-    try:
-        await communicate.save(tmp_path)
-        
-        with open(tmp_path, 'rb') as f:
-            audio_data = f.read()
-        
-        return audio_data
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except:
-                pass
 
 @app.get("/")
 async def root():
@@ -62,30 +42,47 @@ async def convert(
         if not file_name.lower().endswith(".mp3"):
             file_name += ".mp3"
         
-        audio_data = await tts_to_bytes(text, voice, rate, volume, pitch)
+        communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
         
-        if not audio_data or len(audio_data) == 0:
+        audio_chunks = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_chunks.append(chunk["data"])
+        
+        if not audio_chunks:
             return JSONResponse(
                 content={
                     "status_code": 500,
-                    "message": "No audio data generated"
+                    "message": "No audio chunks received from TTS service"
                 },
                 status_code=500
             )
         
-        return StreamingResponse(
-            BytesIO(audio_data),
+        audio_data = b"".join(audio_chunks)
+        
+        if len(audio_data) == 0:
+            return JSONResponse(
+                content={
+                    "status_code": 500,
+                    "message": "Empty audio data received"
+                },
+                status_code=500
+            )
+        
+        return Response(
+            content=audio_data,
             media_type="audio/mpeg",
             headers={
                 "Content-Disposition": f"inline; filename={file_name}",
-                "Content-Length": str(len(audio_data))
+                "Content-Length": str(len(audio_data)),
+                "Accept-Ranges": "bytes"
             }
         )
     except Exception as e:
         return JSONResponse(
             content={
                 "status_code": 500,
-                "message": str(e)
+                "message": f"Error: {str(e)}"
             },
             status_code=500
         )
